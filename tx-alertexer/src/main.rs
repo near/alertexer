@@ -1,54 +1,37 @@
-#![feature(hash_drain_filter)]
-use clap::Parser;
 use futures::StreamExt;
 
-use configs::Opts;
+use shared::{Opts, Parser};
 
-mod configs;
-mod matchers;
-pub(crate) mod sender;
+mod checker;
 pub(crate) mod types;
-mod utils;
 
 pub(crate) const INDEXER: &str = "alertexer";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // MOCK
-    let tx_alert_rule = vec![types::TxAlertRule {
+    let tx_alert_rules = vec![types::TxAlertRule {
         account_id: "aurora".to_owned(),
     }];
     // END MOCK
-    utils::init_tracing();
+    shared::init_tracing();
 
-    tracing::info!(
-        target: INDEXER,
-        "Generating LakeConfig...",
-    );
+    tracing::info!(target: INDEXER, "Generating LakeConfig...",);
     let config: near_lake_framework::LakeConfig = Opts::parse().into();
 
-    tracing::info!(
-        target: INDEXER,
-        "Instantiating the stream...",
-    );
+    tracing::info!(target: INDEXER, "Instantiating the stream...",);
     let (sender, stream) = near_lake_framework::streamer(config);
 
-    tracing::info!(
-        target: INDEXER,
-        "Setting up the internal database...",
-    );
+    tracing::info!(target: INDEXER, "Setting up the internal database...",);
     let alertexer_memory =
         std::sync::Arc::new(tokio::sync::Mutex::new(types::AlertexerMemoryData::new()));
 
-    tracing::info!(
-        target: INDEXER,
-        "Starting Alertexter...",
-    );
+    tracing::info!(target: INDEXER, "Starting Alertexter...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
             handle_streamer_message(
                 streamer_message,
-                &tx_alert_rule,
+                &tx_alert_rules,
                 std::sync::Arc::clone(&alertexer_memory),
             )
         })
@@ -76,25 +59,25 @@ async fn handle_streamer_message(
         streamer_message.block.header.height
     );
 
-    let tx_matcher_future = matchers::transactions(
+    let tx_checker_future = checker::transactions(
         &streamer_message,
         &tx_alert_rule,
         std::sync::Arc::clone(&alertexer_memory),
     );
 
-    match futures::try_join!(tx_matcher_future) {
+    match futures::try_join!(tx_checker_future) {
         Ok(_) => tracing::debug!(
             target: INDEXER,
-            "#{} matchers executed successful",
+            "#{} checkers executed successful",
             streamer_message.block.header.height,
         ),
         Err(e) => tracing::error!(
             target: INDEXER,
-            "#{} an error occurred during executing matchers\n{:#?}",
+            "#{} an error occurred during executing checkers\n{:#?}",
             streamer_message.block.header.height,
             e
         ),
     };
 
-    utils::store_last_indexed_block_height(streamer_message.block.header.height)
+    shared::store_last_indexed_block_height(streamer_message.block.header.height)
 }
