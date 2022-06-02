@@ -3,6 +3,7 @@ use futures::StreamExt;
 use shared::{Opts, Parser};
 
 mod checker;
+pub mod storage;
 pub(crate) mod types;
 
 pub(crate) const INDEXER: &str = "alertexer";
@@ -16,24 +17,19 @@ async fn main() -> anyhow::Result<()> {
     // END MOCK
     shared::init_tracing();
 
-    tracing::info!(target: INDEXER, "Generating LakeConfig...",);
+    tracing::info!(target: INDEXER, "Connecting to redis...");
+    let redis_connection_manager = storage::connect().await?;
+
+    tracing::info!(target: INDEXER, "Generating LakeConfig...");
     let config: near_lake_framework::LakeConfig = Opts::parse().into();
 
     tracing::info!(target: INDEXER, "Instantiating the stream...",);
     let (sender, stream) = near_lake_framework::streamer(config);
 
-    tracing::info!(target: INDEXER, "Setting up the internal database...",);
-    let alertexer_memory =
-        std::sync::Arc::new(tokio::sync::Mutex::new(types::AlertexerMemoryData::new()));
-
     tracing::info!(target: INDEXER, "Starting Alertexter...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
-            handle_streamer_message(
-                streamer_message,
-                &tx_alert_rules,
-                std::sync::Arc::clone(&alertexer_memory),
-            )
+            handle_streamer_message(streamer_message, &tx_alert_rules, &redis_connection_manager)
         })
         .buffer_unordered(1usize);
 
@@ -51,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
 async fn handle_streamer_message(
     streamer_message: near_lake_framework::near_indexer_primitives::StreamerMessage,
     tx_alert_rule: &[types::TxAlertRule],
-    alertexer_memory: types::AlertexerMemory,
+    redis_connection_manager: &redis::aio::ConnectionManager,
 ) -> anyhow::Result<u64> {
     tracing::info!(
         target: INDEXER,
@@ -59,11 +55,8 @@ async fn handle_streamer_message(
         streamer_message.block.header.height
     );
 
-    let tx_checker_future = checker::transactions(
-        &streamer_message,
-        &tx_alert_rule,
-        std::sync::Arc::clone(&alertexer_memory),
-    );
+    let tx_checker_future =
+        checker::transactions(&streamer_message, &tx_alert_rule, &redis_connection_manager);
 
     match futures::try_join!(tx_checker_future) {
         Ok(_) => tracing::debug!(

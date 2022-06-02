@@ -1,6 +1,7 @@
 pub use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+pub use borsh::{BorshDeserialize, BorshSerialize};
 pub mod types;
 
 #[derive(Parser, Debug, Clone)]
