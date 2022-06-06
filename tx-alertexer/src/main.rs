@@ -55,7 +55,7 @@ async fn handle_streamer_message(
     );
 
     let tx_checker_future =
-        checker::transactions(&streamer_message, &tx_alert_rule, &redis_connection_manager);
+        checker::transactions(&streamer_message, tx_alert_rule, redis_connection_manager);
 
     match futures::try_join!(tx_checker_future) {
         Ok(_) => tracing::debug!(

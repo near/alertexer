@@ -98,9 +98,9 @@ pub async fn receipts_transaction_hash_count(
     redis_connection_manager: &ConnectionManager,
     transaction_hash: &str,
 ) -> anyhow::Result<u64> {
-    Ok(get::<u64>(
+    get::<u64>(
         redis_connection_manager,
         format!("receipts_{}", transaction_hash),
     )
-    .await?)
+    .await
 }
