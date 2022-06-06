@@ -12,9 +12,9 @@ pub(crate) async fn transactions(
     transaction_alert_rules: &[TxAlertRule],
     redis_connection_manager: &redis::aio::ConnectionManager,
 ) -> anyhow::Result<()> {
-    let futures = transaction_alert_rules.iter().map(|tx_alert_rule| {
-        tx_matcher(streamer_message, tx_alert_rule, redis_connection_manager)
-    });
+    let futures = transaction_alert_rules
+        .iter()
+        .map(|tx_alert_rule| tx_matcher(streamer_message, tx_alert_rule, redis_connection_manager));
 
     join_all(futures).await;
 
@@ -137,7 +137,9 @@ async fn outcomes_and_receipts(
             }
 
             // Add the success receipt to the watching list
-            if let ExecutionStatusView::SuccessReceiptId(receipt_id) = receipt_execution_outcome.execution_outcome.outcome.status {
+            if let ExecutionStatusView::SuccessReceiptId(receipt_id) =
+                receipt_execution_outcome.execution_outcome.outcome.status
+            {
                 tracing::debug!(target: crate::INDEXER, "+R {}", &receipt_id.to_string(),);
                 storage::push_receipt_to_watching_list(
                     redis_connection_manager,
