@@ -158,9 +158,14 @@ async fn outcomes_and_receipts(
                 &transaction_hash,
                 receipt_execution_outcome.clone(),
             )
-            .await {
-                Ok(_) => {},
-                Err(e) => tracing::error!(target: crate::INDEXER, "Failed to push_outcome_and_receipt\n{:#?}", e),
+            .await
+            {
+                Ok(_) => {}
+                Err(e) => tracing::error!(
+                    target: crate::INDEXER,
+                    "Failed to push_outcome_and_receipt\n{:#?}",
+                    e
+                ),
             };
         }
     }

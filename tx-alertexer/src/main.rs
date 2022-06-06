@@ -72,5 +72,12 @@ async fn handle_streamer_message(
         ),
     };
 
-    shared::store_last_indexed_block_height(streamer_message.block.header.height)
+    storage::set_str(
+        redis_connection_manager,
+        "last_indexed_block",
+        &streamer_message.block.header.height.to_string(),
+    )
+    .await?;
+
+    Ok(streamer_message.block.header.height)
 }

@@ -232,14 +232,20 @@ pub async fn push_outcome_and_receipt(
                 .clone(),
         );
 
-        let transaction_receipts_watching_count = tx_receipts_watching_count(redis_connection_manager, transaction_hash).await?;
+        let transaction_receipts_watching_count =
+            tx_receipts_watching_count(redis_connection_manager, transaction_hash).await?;
         if transaction_receipts_watching_count == 0 {
             tracing::debug!(target: crate::INDEXER, "Finished TX {}", &transaction_hash,);
 
             push_tx_to_send(redis_connection_manager, transaction_details).await?;
             del(redis_connection_manager, transaction_hash).await?;
         } else {
-            tracing::debug!(target: crate::INDEXER, "{} | UPDATE TX {}", transaction_receipts_watching_count, &transaction_hash);
+            tracing::debug!(
+                target: crate::INDEXER,
+                "{} | UPDATE TX {}",
+                transaction_receipts_watching_count,
+                &transaction_hash
+            );
             set_tx(redis_connection_manager, transaction_details).await?;
         }
     } else {

@@ -57,6 +57,7 @@ impl From<Opts> for near_lake_framework::LakeConfig {
     }
 }
 
+// TODO: refactor to read from Redis once `storage` is extracted to a separate crate
 fn get_start_block_height(opts: &Opts) -> u64 {
     match opts.start_options() {
         StartOptions::FromBlock { height } => *height,
@@ -95,9 +96,4 @@ pub fn init_tracing() {
         .with_env_filter(env_filter)
         .with_writer(std::io::stderr)
         .init();
-}
-
-pub fn store_last_indexed_block_height(block_height: u64) -> anyhow::Result<u64> {
-    std::fs::write("last_indexed_block", block_height.to_string().as_bytes())?;
-    Ok(block_height)
 }
