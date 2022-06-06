@@ -14,6 +14,8 @@ pub mod types;
     next_line_help(true)
 )]
 pub struct Opts {
+    #[clap(long, default_value = "redis://127.0.0.1")]
+    pub redis_connection_string: String,
     #[clap(subcommand)]
     pub chain_id: ChainId,
 }

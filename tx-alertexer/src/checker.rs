@@ -1,12 +1,11 @@
 use futures::future::{join_all, try_join_all};
+
+use alert_rules::TxAlertRule;
 use near_lake_framework::{
     near_indexer_primitives::views::ExecutionStatusView,
     near_indexer_primitives::IndexerTransactionWithOutcome,
 };
-
 use shared::types::transactions::TransactionDetails;
-
-use crate::types::TxAlertRule;
 
 pub(crate) async fn transactions(
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
@@ -22,7 +21,7 @@ pub(crate) async fn transactions(
     outcomes_and_receipts(streamer_message, &redis_connection_manager).await;
 
     let finished_transaction_details =
-        crate::storage::transactions_to_send(redis_connection_manager).await?;
+        crate::storage_ext::transactions_to_send(redis_connection_manager).await?;
 
     if !finished_transaction_details.is_empty() {
         tokio::spawn(async move {
@@ -82,9 +81,9 @@ async fn start_collecting_tx(
         .to_string();
 
     let transaction_details = TransactionDetails::from_indexer_tx(transaction.clone());
-    match crate::storage::set_tx(redis_connection_manager, transaction_details).await {
+    match crate::storage_ext::set_tx(redis_connection_manager, transaction_details).await {
         Ok(_) => {
-            crate::storage::push_receipt_id_to_watching_list(
+            storage::push_receipt_to_watching_list(
                 redis_connection_manager,
                 &converted_into_receipt_id,
                 &transaction_hash_string,
@@ -112,7 +111,7 @@ async fn outcomes_and_receipts(
         .flatten();
 
     for receipt_execution_outcome in receipt_execution_outcomes {
-        if let Ok(Some(transaction_hash)) = crate::storage::remove_receipt_id_from_watching_list(
+        if let Ok(Some(transaction_hash)) = storage::remove_receipt_from_watching_list(
             redis_connection_manager,
             &receipt_execution_outcome.receipt.receipt_id.to_string(),
         )
@@ -131,7 +130,7 @@ async fn outcomes_and_receipts(
                 .iter()
             {
                 tracing::debug!(target: crate::INDEXER, "+R {}", &receipt_id.to_string(),);
-                crate::storage::push_receipt_id_to_watching_list(
+                storage::push_receipt_to_watching_list(
                     redis_connection_manager,
                     &receipt_id.to_string(),
                     &transaction_hash,
@@ -143,7 +142,7 @@ async fn outcomes_and_receipts(
             match receipt_execution_outcome.execution_outcome.outcome.status {
                 ExecutionStatusView::SuccessReceiptId(receipt_id) => {
                     tracing::debug!(target: crate::INDEXER, "+R {}", &receipt_id.to_string(),);
-                    crate::storage::push_receipt_id_to_watching_list(
+                    storage::push_receipt_to_watching_list(
                         redis_connection_manager,
                         &receipt_id.to_string(),
                         &transaction_hash,
@@ -153,7 +152,7 @@ async fn outcomes_and_receipts(
                 _ => {}
             };
 
-            match crate::storage::push_outcome_and_receipt(
+            match crate::storage_ext::push_outcome_and_receipt(
                 redis_connection_manager,
                 &transaction_hash,
                 receipt_execution_outcome.clone(),
@@ -171,7 +170,7 @@ async fn outcomes_and_receipts(
     }
 }
 
-async fn send_transaction_details(transaction_details: crate::types::TransactionDetails) -> bool {
+async fn send_transaction_details(transaction_details: TransactionDetails) -> bool {
     loop {
         match queue_sender::send_to_the_queue(format!(
             "TX {} affects {}\n",

@@ -3,30 +3,29 @@ use futures::StreamExt;
 use shared::{Opts, Parser};
 
 mod checker;
-pub mod storage;
-pub(crate) mod types;
-
+pub(crate) mod storage_ext;
 pub(crate) const INDEXER: &str = "alertexer";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // MOCK
-    let tx_alert_rules = vec![types::TxAlertRule {
+    let tx_alert_rules = vec![alert_rules::TxAlertRule {
         account_id: "aurora".to_owned(),
     }];
     // END MOCK
     shared::init_tracing();
 
+    let opts = Opts::parse();
     tracing::info!(target: INDEXER, "Connecting to redis...");
-    let redis_connection_manager = storage::connect().await?;
+    let redis_connection_manager = storage::connect(&opts.redis_connection_string).await?;
 
     tracing::info!(target: INDEXER, "Generating LakeConfig...");
-    let config: near_lake_framework::LakeConfig = Opts::parse().into();
+    let config: near_lake_framework::LakeConfig = opts.into();
 
     tracing::info!(target: INDEXER, "Instantiating the stream...",);
     let (sender, stream) = near_lake_framework::streamer(config);
 
-    tracing::info!(target: INDEXER, "Starting Alertexter...",);
+    tracing::info!(target: INDEXER, "Starting Alertexer...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
             handle_streamer_message(streamer_message, &tx_alert_rules, &redis_connection_manager)
@@ -46,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn handle_streamer_message(
     streamer_message: near_lake_framework::near_indexer_primitives::StreamerMessage,
-    tx_alert_rule: &[types::TxAlertRule],
+    tx_alert_rule: &[alert_rules::TxAlertRule],
     redis_connection_manager: &redis::aio::ConnectionManager,
 ) -> anyhow::Result<u64> {
     tracing::info!(
@@ -72,7 +71,7 @@ async fn handle_streamer_message(
         ),
     };
 
-    storage::set_str(
+    storage::set(
         redis_connection_manager,
         "last_indexed_block",
         &streamer_message.block.header.height.to_string(),

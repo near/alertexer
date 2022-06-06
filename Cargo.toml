@@ -5,4 +5,5 @@ members = [
     "shared",
     "queue-sender",
     "alert-rules",
+    "storage",
 ]
