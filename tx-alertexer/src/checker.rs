@@ -10,7 +10,7 @@ use shared::types::transactions::TransactionDetails;
 pub(crate) async fn transactions(
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
     transaction_alert_rules: &[TxAlertRule],
-    redis_connection_manager: &redis::aio::ConnectionManager,
+    redis_connection_manager: &storage::ConnectionManager,
 ) -> anyhow::Result<()> {
     let futures = transaction_alert_rules
         .iter()
@@ -39,7 +39,7 @@ pub(crate) async fn transactions(
 async fn tx_matcher(
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
     alert_rule: &TxAlertRule,
-    redis_connection_manager: &redis::aio::ConnectionManager,
+    redis_connection_manager: &storage::ConnectionManager,
 ) -> anyhow::Result<()> {
     let futures = streamer_message
         .shards
@@ -67,7 +67,7 @@ async fn start_collecting_tx(
     transaction: &IndexerTransactionWithOutcome,
     alert_rule: &TxAlertRule,
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
-    redis_connection_manager: &redis::aio::ConnectionManager,
+    redis_connection_manager: &storage::ConnectionManager,
 ) -> anyhow::Result<()> {
     let transaction_hash_string = transaction.transaction.hash.to_string();
     let converted_into_receipt_id = transaction
@@ -101,7 +101,7 @@ async fn start_collecting_tx(
 
 async fn outcomes_and_receipts(
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
-    redis_connection_manager: &redis::aio::ConnectionManager,
+    redis_connection_manager: &storage::ConnectionManager,
 ) {
     let receipt_execution_outcomes = streamer_message
         .shards

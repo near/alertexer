@@ -1,4 +1,4 @@
-use redis::aio::ConnectionManager;
+use storage::ConnectionManager;
 
 use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithReceipt;
 
@@ -28,23 +28,11 @@ pub async fn set_tx(
     Ok(())
 }
 
-pub async fn del(redis_connection_manager: &ConnectionManager, key: &str) -> anyhow::Result<()> {
-    redis::cmd("DEL")
-        .arg(key)
-        .query_async(&mut redis_connection_manager.clone())
-        .await?;
-
-    Ok(())
-}
-
 pub async fn get_tx(
     redis_connection_manager: &ConnectionManager,
     transaction_hash: &str,
 ) -> anyhow::Result<Option<TransactionDetails>> {
-    let value: Vec<u8> = redis::cmd("GET")
-        .arg(transaction_hash)
-        .query_async(&mut redis_connection_manager.clone())
-        .await?;
+    let value: Vec<u8> = storage::get(redis_connection_manager, transaction_hash).await?;
 
     Ok(Some(TransactionDetails::try_from_slice(&value)?))
 }
@@ -55,7 +43,7 @@ pub async fn push_tx_to_send(
 ) -> anyhow::Result<()> {
     let encoded_tx_details = transaction_details.try_to_vec()?;
 
-    redis::cmd("RPUSH")
+    storage::redis::cmd("RPUSH")
         .arg(TX_TO_SEND_LIST_KEY)
         .arg(&encoded_tx_details)
         .query_async(&mut redis_connection_manager.clone())
@@ -67,12 +55,12 @@ pub async fn push_tx_to_send(
 pub async fn transactions_to_send(
     redis_connection_manager: &ConnectionManager,
 ) -> anyhow::Result<Vec<TransactionDetails>> {
-    let length: usize = redis::cmd("LLEN")
+    let length: usize = storage::redis::cmd("LLEN")
         .arg(TX_TO_SEND_LIST_KEY)
         .query_async(&mut redis_connection_manager.clone())
         .await?;
 
-    let values: Vec<Vec<u8>> = redis::cmd("LPOP")
+    let values: Vec<Vec<u8>> = storage::redis::cmd("LPOP")
         .arg(TX_TO_SEND_LIST_KEY)
         .arg(length)
         .query_async(&mut redis_connection_manager.clone())
@@ -127,7 +115,7 @@ pub async fn push_outcome_and_receipt(
             tracing::debug!(target: crate::INDEXER, "Finished TX {}", &transaction_hash,);
 
             push_tx_to_send(redis_connection_manager, transaction_details).await?;
-            del(redis_connection_manager, transaction_hash).await?;
+            storage::del(redis_connection_manager, transaction_hash).await?;
         } else {
             tracing::debug!(
                 target: crate::INDEXER,

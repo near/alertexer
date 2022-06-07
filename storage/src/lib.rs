@@ -1,5 +1,5 @@
 #![feature(explicit_generic_args_with_impl_trait)]
-pub use redis::{aio::ConnectionManager, FromRedisValue, ToRedisArgs};
+pub use redis::{self, aio::ConnectionManager, FromRedisValue, ToRedisArgs};
 
 const STORAGE: &str = "storage_alertexer";
 
