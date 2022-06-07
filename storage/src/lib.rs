@@ -104,3 +104,15 @@ pub async fn receipts_transaction_hash_count(
     )
     .await
 }
+
+pub async fn update_last_indexed_block(
+    redis_connection_manager: &ConnectionManager,
+    block_height: u64,
+) -> anyhow::Result<()> {
+    set(redis_connection_manager, "last_indexed_block", block_height).await?;
+    redis::cmd("INCR")
+        .arg("blocks_processed")
+        .query_async(&mut redis_connection_manager.clone())
+        .await?;
+    Ok(())
+}
