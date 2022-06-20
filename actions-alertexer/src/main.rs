@@ -9,12 +9,18 @@ pub(crate) const INDEXER: &str = "alertexer";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let pool = alert_rules::connect("postgres://root:1111@localhost/pagoda_alerts").await?;
-    let alert_rules = alert_rules::AlertRule::fetch_alert_rules(&pool).await?;
-
     shared::init_tracing();
 
+    shared::dotenv::dotenv().ok();
+
     let opts = Opts::parse();
+
+    let queue_client = &opts.queue_client();
+    let queue_url = opts.queue_url.clone();
+
+    let pool = alert_rules::connect(&opts.database_url).await?;
+    let alert_rules = alert_rules::AlertRule::fetch_alert_rules(&pool).await?;
+
     tracing::info!(target: INDEXER, "Connecting to redis...");
     let redis_connection_manager = storage::connect(&opts.redis_connection_string).await?;
 
@@ -28,7 +34,13 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(target: INDEXER, "Starting Alertexer...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
-            handle_streamer_message(streamer_message, &alert_rules, &redis_connection_manager)
+            handle_streamer_message(
+                streamer_message,
+                &alert_rules,
+                &redis_connection_manager,
+                &queue_client,
+                &queue_url,
+            )
         })
         .buffer_unordered(1usize);
 
@@ -47,9 +59,16 @@ async fn handle_streamer_message(
     streamer_message: near_lake_framework::near_indexer_primitives::StreamerMessage,
     alert_rules: &[alert_rules::AlertRule],
     redis_connection_manager: &storage::ConnectionManager,
+    queue_client: &shared::QueueClient,
+    queue_url: &str,
 ) -> anyhow::Result<u64> {
-    let receipt_checker_future =
-        checker::receipts(&streamer_message, alert_rules, redis_connection_manager);
+    let receipt_checker_future = checker::receipts(
+        &streamer_message,
+        alert_rules,
+        redis_connection_manager,
+        queue_client,
+        queue_url,
+    );
 
     match futures::try_join!(receipt_checker_future) {
         Ok(_) => tracing::debug!(
