@@ -3,6 +3,7 @@ pub use clap::{Parser, Subcommand};
 pub use dotenv;
 use tracing_subscriber::EnvFilter;
 
+pub use base64;
 pub use borsh::{BorshDeserialize, BorshSerialize};
 pub mod types;
 
