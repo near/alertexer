@@ -1,6 +1,6 @@
 {
   "db": "PostgreSQL",
-  "20ebde769b39e67a91ee61f8c0489006a47de7269c351ca704eed627a79398fa": {
+  "1afa2f101273f48c53ef99b361b1fa9a541c78e18a877e5c950537669900cc31": {
     "describe": {
       "columns": [
         {
@@ -44,17 +44,23 @@
           }
         },
         {
-          "name": "updated_at",
+          "name": "is_paused",
           "ordinal": 4,
+          "type_info": "Bool"
+        },
+        {
+          "name": "updated_at",
+          "ordinal": 5,
           "type_info": "Timestamptz"
         },
         {
           "name": "matching_rule: sqlx::types::Json<MatchingRule>",
-          "ordinal": 5,
+          "ordinal": 6,
           "type_info": "Json"
         }
       ],
       "nullable": [
+        false,
         false,
         false,
         false,
@@ -66,6 +72,6 @@
         "Left": []
       }
     },
-    "query": "\nSELECT id, name, chain_id as \"chain_id: _\", alert_rule_kind as \"alert_rule_kind: _\", updated_at, matching_rule as \"matching_rule: sqlx::types::Json<MatchingRule>\"\nFROM alert_rules\n            "
+    "query": "\nSELECT id, name, chain_id as \"chain_id: _\", alert_rule_kind as \"alert_rule_kind: _\", is_paused, updated_at, matching_rule as \"matching_rule: sqlx::types::Json<MatchingRule>\"\nFROM alert_rules\n            "
   }
 }
