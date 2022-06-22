@@ -1,6 +1,6 @@
 #![feature(explicit_generic_args_with_impl_trait)]
-use std::collections::HashMap;
 use futures::StreamExt;
+use std::collections::HashMap;
 
 use shared::{Opts, Parser};
 
@@ -8,7 +8,8 @@ mod checker;
 pub(crate) mod matchers;
 pub(crate) const INDEXER: &str = "alertexer";
 
-pub(crate) type AlertRulesInMemory = std::sync::Arc<tokio::sync::Mutex<HashMap<i32, alert_rules::AlertRule>>>;
+pub(crate) type AlertRulesInMemory =
+    std::sync::Arc<tokio::sync::Mutex<HashMap<i32, alert_rules::AlertRule>>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,13 +21,17 @@ async fn main() -> anyhow::Result<()> {
 
     let queue_client = &opts.queue_client();
     let queue_url = opts.queue_url.clone();
-    let alert_rules_inmemory: AlertRulesInMemory = std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let alert_rules_inmemory: AlertRulesInMemory =
+        std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     tracing::info!(target: INDEXER, "Connecting to redis...");
     let redis_connection_manager = storage::connect(&opts.redis_connection_string).await?;
 
     tracing::info!(target: INDEXER, "Starting the Alert Rules fetcher...");
-    tokio::spawn(alert_rules_fetcher(opts.database_url.clone(), std::sync::Arc::clone(&alert_rules_inmemory)));
+    tokio::spawn(alert_rules_fetcher(
+        opts.database_url.clone(),
+        std::sync::Arc::clone(&alert_rules_inmemory),
+    ));
 
     tracing::info!(target: INDEXER, "Generating LakeConfig...");
     let config: near_lake_framework::LakeConfig = opts.into();
@@ -34,7 +39,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(target: INDEXER, "Instantiating the stream...",);
     let (sender, stream) = near_lake_framework::streamer(config);
 
-    tokio::spawn(stats(redis_connection_manager.clone(), std::sync::Arc::clone(&alert_rules_inmemory)));
+    tokio::spawn(stats(
+        redis_connection_manager.clone(),
+        std::sync::Arc::clone(&alert_rules_inmemory),
+    ));
     tracing::info!(target: INDEXER, "Starting Alertexer...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
@@ -42,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
                 streamer_message,
                 std::sync::Arc::clone(&alert_rules_inmemory),
                 &redis_connection_manager,
-                &queue_client,
+                queue_client,
                 &queue_url,
             )
         })
@@ -68,10 +76,8 @@ async fn handle_streamer_message(
 ) -> anyhow::Result<u64> {
     let alert_rules_inmemory_lock = alert_rules_inmemory.lock().await;
     // TODO: avoid cloning
-    let alert_rules: Vec<alert_rules::AlertRule> = alert_rules_inmemory_lock
-        .values()
-        .map(|alert_rule| alert_rule.clone())
-        .collect();
+    let alert_rules: Vec<alert_rules::AlertRule> =
+        alert_rules_inmemory_lock.values().cloned().collect();
     drop(alert_rules_inmemory_lock);
 
     let receipt_checker_future = checker::receipts(
@@ -107,12 +113,17 @@ async fn handle_streamer_message(
 
 async fn alert_rules_fetcher(
     database_connection_string: String,
-    alert_rules_inmemory: AlertRulesInMemory) {
+    alert_rules_inmemory: AlertRulesInMemory,
+) {
     let pool = loop {
         match alert_rules::connect(&database_connection_string).await {
             Ok(res) => break res,
             Err(err) => {
-                tracing::warn!(target: INDEXER, "Failed to establish connection with DB. Retrying in 10s...\n{:#?}", err);
+                tracing::warn!(
+                    target: INDEXER,
+                    "Failed to establish connection with DB. Retrying in 10s...\n{:#?}",
+                    err
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             }
         }
@@ -126,9 +137,13 @@ async fn alert_rules_fetcher(
                         .into_iter()
                         .map(|alert_rule| (alert_rule.id, alert_rule))
                         .collect()
-                },
+                }
                 Err(err) => {
-                    tracing::warn!(target: INDEXER, "Failed to fetch AlertRulesInMemory from DB. Retrying in 10s...\n{:#?}", err);
+                    tracing::warn!(
+                        target: INDEXER,
+                        "Failed to fetch AlertRulesInMemory from DB. Retrying in 10s...\n{:#?}",
+                        err
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 }
             }
