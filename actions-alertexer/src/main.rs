@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     tracing::info!(target: INDEXER, "Generating LakeConfig...");
-    let config: near_lake_framework::LakeConfig = opts.into();
+    let config: near_lake_framework::LakeConfig = opts.to_lake_config().await;
 
     tracing::info!(target: INDEXER, "Instantiating the stream...",);
     let (sender, stream) = near_lake_framework::streamer(config);
@@ -197,7 +197,11 @@ async fn stats(
         {
             Ok(value) => value,
             Err(err) => {
-                tracing::error!(target: "stats", "Failed to get `blocks_processed` from Redis. Retry in 10s...\n{:#?}", err);
+                tracing::error!(
+                    target: "stats",
+                    "Failed to get `blocks_processed` from Redis. Retry in 10s...\n{:#?}",
+                    err,
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 continue;
             }
@@ -206,9 +210,28 @@ async fn stats(
         let alert_rules_count = alert_rules_inmemory_lock.len();
         drop(alert_rules_inmemory_lock);
 
-        let bps = (processed_blocks - previous_processed_blocks) / interval_secs * 60;
+        let last_indexed_block = match storage::get_last_indexed_block(&redis_connection_manager).await {
+            Ok(block_height) => block_height,
+            Err(err) => {
+                tracing::warn!(
+                    target: "stats",
+                    "Failed to get last indexed block\n{:#?}",
+                    err,
+                );
+                0
+            }
+        };
 
-        tracing::info!(target: "stats", "{} bps | {} AlertRules", bps, alert_rules_count);
+        let bps = (processed_blocks - previous_processed_blocks) as f64 / interval_secs as f64 * 60f64;
+
+        tracing::info!(
+            target: "stats",
+            "#{} | {} bps | {} blocks processed | {} AlertRules",
+            last_indexed_block,
+            bps,
+            processed_blocks,
+            alert_rules_count,
+        );
         previous_processed_blocks = processed_blocks;
         tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
     }
