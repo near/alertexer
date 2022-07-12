@@ -139,7 +139,9 @@ async fn get_start_block_height(opts: &Opts) -> u64 {
     match opts.start_options() {
         StartOptions::FromBlock { height } => *height,
         StartOptions::FromInterruption => {
-            let redis_connection_manager = match storage::connect(&opts.redis_connection_string).await {
+            let redis_connection_manager = match storage::connect(&opts.redis_connection_string)
+                .await
+            {
                 Ok(connection_manager) => connection_manager,
                 Err(err) => {
                     tracing::warn!(
@@ -161,10 +163,8 @@ async fn get_start_block_height(opts: &Opts) -> u64 {
                     final_block_height().await
                 }
             }
-        },
-        StartOptions::FromLatest => {
-            final_block_height().await
         }
+        StartOptions::FromLatest => final_block_height().await,
     }
 }
 

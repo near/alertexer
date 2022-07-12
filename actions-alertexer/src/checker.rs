@@ -84,7 +84,12 @@ async fn cache_receipts_from_outcomes(
 ) -> anyhow::Result<()> {
     let cache_futures = receipt_execution_outcomes
         .iter()
-        .map(|receipt_execution_outcome| cache_receipts_from_execution_outcome(receipt_execution_outcome, redis_connection_manager));
+        .map(|receipt_execution_outcome| {
+            cache_receipts_from_execution_outcome(
+                receipt_execution_outcome,
+                redis_connection_manager,
+            )
+        });
 
     try_join_all(cache_futures).await?;
     Ok(())
@@ -144,15 +149,17 @@ async fn rule_handler(
     let triggered_rules_futures = receipt_execution_outcomes
         .iter()
         .filter(|receipt_execution_outcome| alert_rule.matches(receipt_execution_outcome))
-        .map(|receipt_execution_outcome| triggered_rule_handler(
-            block_hash,
-            chain_id,
-            alert_rule,
-            receipt_execution_outcome,
-            redis_connection_manager,
-            queue_client,
-            queue_url,
-        ));
+        .map(|receipt_execution_outcome| {
+            triggered_rule_handler(
+                block_hash,
+                chain_id,
+                alert_rule,
+                receipt_execution_outcome,
+                redis_connection_manager,
+                queue_client,
+                queue_url,
+            )
+        });
 
     try_join_all(triggered_rules_futures).await?;
 
@@ -170,8 +177,7 @@ async fn triggered_rule_handler(
 ) -> anyhow::Result<()> {
     let receipt_id = receipt_execution_outcome.receipt.receipt_id.to_string();
     if let Some(transaction_hash) =
-        storage::remove_receipt_from_watching_list(redis_connection_manager, &receipt_id)
-            .await?
+        storage::remove_receipt_from_watching_list(redis_connection_manager, &receipt_id).await?
     {
         send_trigger_to_queue(
             block_hash,
