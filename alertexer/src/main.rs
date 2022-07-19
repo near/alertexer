@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use shared::{Opts, Parser};
 
-mod checker;
+pub(crate) mod cache;
+mod checkers;
 pub(crate) mod matchers;
 pub(crate) const INDEXER: &str = "alertexer";
 
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
         .map(|streamer_message| {
             handle_streamer_message(
                 streamer_message,
-                &chain_id,
+                chain_id,
                 std::sync::Arc::clone(&alert_rules_inmemory),
                 &redis_connection_manager,
                 queue_client,
@@ -84,7 +85,9 @@ async fn handle_streamer_message(
         alert_rules_inmemory_lock.values().cloned().collect();
     drop(alert_rules_inmemory_lock);
 
-    let receipt_checker_future = checker::receipts(
+    cache::cache_txs_and_receipts(&streamer_message, redis_connection_manager).await?;
+
+    let receipt_checker_future = checkers::actions::check_receipts(
         &streamer_message,
         chain_id,
         &alert_rules,
@@ -93,7 +96,16 @@ async fn handle_streamer_message(
         queue_url,
     );
 
-    match futures::try_join!(receipt_checker_future) {
+    let events_checker_future = checkers::events::check_outcomes(
+        &streamer_message,
+        chain_id,
+        &alert_rules,
+        redis_connection_manager,
+        queue_client,
+        queue_url,
+    );
+
+    match futures::try_join!(receipt_checker_future, events_checker_future) {
         Ok(_) => tracing::debug!(
             target: INDEXER,
             "#{} checkers executed successful",
@@ -219,8 +231,7 @@ async fn stats(
                 }
             };
 
-        let bps =
-            (processed_blocks - previous_processed_blocks) as f64 / interval_secs as f64 * 60f64;
+        let bps = (processed_blocks - previous_processed_blocks) as f64 / interval_secs as f64;
 
         tracing::info!(
             target: "stats",

@@ -1,14 +1,13 @@
+use borsh::BorshDeserialize;
 use futures::future::try_join_all;
 
 use alert_rules::AlertRule;
 
-use near_lake_framework::near_indexer_primitives::{
-    views::ExecutionStatusView, IndexerExecutionOutcomeWithReceipt, IndexerTransactionWithOutcome,
-};
+use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithReceipt;
 
 use crate::matchers::Matcher;
 
-pub(crate) async fn receipts(
+pub(crate) async fn check_outcomes(
     streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
     chain_id: &shared::types::primitives::ChainId,
     alert_rules: &[AlertRule],
@@ -16,23 +15,13 @@ pub(crate) async fn receipts(
     queue_client: &shared::QueueClient,
     queue_url: &str,
 ) -> anyhow::Result<()> {
-    let cache_tx_receipts_future = streamer_message
-        .shards
-        .iter()
-        .filter_map(|shard| shard.chunk.as_ref())
-        .map(|chunk| cache_receipts_from_tx(chunk.transactions.as_ref(), redis_connection_manager));
-
-    try_join_all(cache_tx_receipts_future).await?;
+    let block_hash_string = streamer_message.block.header.hash.to_string();
 
     let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
         .shards
         .iter()
         .flat_map(|shard| shard.receipt_execution_outcomes.clone())
         .collect();
-
-    cache_receipts_from_outcomes(&receipt_execution_outcomes, redis_connection_manager).await?;
-
-    let block_hash_string = streamer_message.block.header.hash.to_string();
 
     let execution_outcomes_rule_handler_future = alert_rules.iter().map(|alert_rule| {
         rule_handler(
@@ -48,92 +37,6 @@ pub(crate) async fn receipts(
 
     try_join_all(execution_outcomes_rule_handler_future).await?;
 
-    Ok(())
-}
-
-async fn cache_receipts_from_tx(
-    transactions: &[IndexerTransactionWithOutcome],
-    redis_connection_manager: &storage::ConnectionManager,
-) -> anyhow::Result<()> {
-    let push_receipt_to_watching_list_future = transactions.iter().map(|tx| async {
-        let transaction_hash_string = tx.transaction.hash.to_string();
-        let converted_into_receipt_id = tx
-            .outcome
-            .execution_outcome
-            .outcome
-            .receipt_ids
-            .first()
-            .expect("`receipt_ids` must contain one Receipt ID")
-            .to_string();
-
-        return storage::push_receipt_to_watching_list(
-            redis_connection_manager,
-            &converted_into_receipt_id,
-            &transaction_hash_string,
-        )
-        .await;
-    });
-    try_join_all(push_receipt_to_watching_list_future).await?;
-
-    Ok(())
-}
-
-async fn cache_receipts_from_outcomes(
-    receipt_execution_outcomes: &[IndexerExecutionOutcomeWithReceipt],
-    redis_connection_manager: &storage::ConnectionManager,
-) -> anyhow::Result<()> {
-    let cache_futures = receipt_execution_outcomes
-        .iter()
-        .map(|receipt_execution_outcome| {
-            cache_receipts_from_execution_outcome(
-                receipt_execution_outcome,
-                redis_connection_manager,
-            )
-        });
-
-    try_join_all(cache_futures).await?;
-    Ok(())
-}
-
-async fn cache_receipts_from_execution_outcome(
-    receipt_execution_outcome: &IndexerExecutionOutcomeWithReceipt,
-    redis_connection_manager: &storage::ConnectionManager,
-) -> anyhow::Result<()> {
-    if let Ok(Some(transaction_hash)) = storage::get::<Option<String>>(
-        redis_connection_manager,
-        &receipt_execution_outcome.receipt.receipt_id.to_string(),
-    )
-    .await
-    {
-        // Add the newly produced receipt_ids to the watching list
-        for receipt_id in receipt_execution_outcome
-            .execution_outcome
-            .outcome
-            .receipt_ids
-            .iter()
-        {
-            tracing::debug!(target: crate::INDEXER, "+R {}", &receipt_id.to_string(),);
-            storage::push_receipt_to_watching_list(
-                redis_connection_manager,
-                &receipt_id.to_string(),
-                &transaction_hash,
-            )
-            .await?;
-        }
-
-        // Add the success receipt to the watching list
-        if let ExecutionStatusView::SuccessReceiptId(receipt_id) =
-            receipt_execution_outcome.execution_outcome.outcome.status
-        {
-            tracing::debug!(target: crate::INDEXER, "+R {}", &receipt_id.to_string(),);
-            storage::push_receipt_to_watching_list(
-                redis_connection_manager,
-                &receipt_id.to_string(),
-                &transaction_hash,
-            )
-            .await?;
-        }
-    }
     Ok(())
 }
 
@@ -176,14 +79,16 @@ async fn triggered_rule_handler(
     queue_url: &str,
 ) -> anyhow::Result<()> {
     let receipt_id = receipt_execution_outcome.receipt.receipt_id.to_string();
-    if let Some(transaction_hash) =
-        storage::remove_receipt_from_watching_list(redis_connection_manager, &receipt_id).await?
+    if let Some(cache_value_bytes) =
+        storage::get::<Option<Vec<u8>>>(redis_connection_manager, &receipt_id).await?
     {
+        let cache_value = crate::cache::CacheValue::try_from_slice(&cache_value_bytes)?;
+
         send_trigger_to_queue(
             block_hash,
             chain_id,
             alert_rule,
-            &transaction_hash,
+            &cache_value.transaction_hash,
             &receipt_id,
             queue_client,
             queue_url,
@@ -215,7 +120,7 @@ async fn send_trigger_to_queue(
             shared::types::primitives::AlertQueueMessage {
                 chain_id: chain_id.clone(),
                 alert_rule_id: alert_rule.id,
-                payload: shared::types::primitives::AlertQueueMessagePayload::Actions {
+                payload: shared::types::primitives::AlertQueueMessagePayload::Events {
                     block_hash: block_hash.to_string(),
                     receipt_id: receipt_id.to_string(),
                     transaction_hash: transaction_hash.to_string(),
