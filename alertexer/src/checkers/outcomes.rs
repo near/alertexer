@@ -1,31 +1,24 @@
 use borsh::BorshDeserialize;
 use futures::future::try_join_all;
 
-use alert_rules::AlertRule;
+use alert_rules::{AlertRule, MatchingRule};
 
 use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithReceipt;
 
 use crate::matchers::Matcher;
 
 pub(crate) async fn check_outcomes(
-    streamer_message: &near_lake_framework::near_indexer_primitives::StreamerMessage,
+    receipt_execution_outcomes: &[IndexerExecutionOutcomeWithReceipt],
+    block_hash: &str,
     chain_id: &shared::types::primitives::ChainId,
     alert_rules: &[AlertRule],
     redis_connection_manager: &storage::ConnectionManager,
     queue_client: &shared::QueueClient,
     queue_url: &str,
 ) -> anyhow::Result<()> {
-    let block_hash_string = streamer_message.block.header.hash.to_string();
-
-    let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
-        .shards
-        .iter()
-        .flat_map(|shard| shard.receipt_execution_outcomes.clone())
-        .collect();
-
     let execution_outcomes_rule_handler_future = alert_rules.iter().map(|alert_rule| {
         rule_handler(
-            &block_hash_string,
+            block_hash,
             chain_id,
             alert_rule,
             &receipt_execution_outcomes,
@@ -120,11 +113,12 @@ async fn send_trigger_to_queue(
             shared::types::primitives::AlertQueueMessage {
                 chain_id: chain_id.clone(),
                 alert_rule_id: alert_rule.id,
-                payload: shared::types::primitives::AlertQueueMessagePayload::Events {
-                    block_hash: block_hash.to_string(),
-                    receipt_id: receipt_id.to_string(),
-                    transaction_hash: transaction_hash.to_string(),
-                },
+                payload: build_alert_queue_message_payload(
+                    alert_rule,
+                    block_hash,
+                    transaction_hash,
+                    receipt_id,
+                ),
             },
         )
         .await
@@ -141,4 +135,30 @@ async fn send_trigger_to_queue(
         }
     }
     Ok(())
+}
+
+fn build_alert_queue_message_payload(
+    alert_rule: &AlertRule,
+    block_hash: &str,
+    transaction_hash: &str,
+    receipt_id: &str,
+) -> shared::types::primitives::AlertQueueMessagePayload {
+    match alert_rule.matching_rule() {
+        MatchingRule::ActionAny { .. }
+        | MatchingRule::ActionTransfer { .. }
+        | MatchingRule::ActionFunctionCall { .. } => {
+            shared::types::primitives::AlertQueueMessagePayload::Actions {
+                block_hash: block_hash.to_string(),
+                receipt_id: receipt_id.to_string(),
+                transaction_hash: transaction_hash.to_string(),
+            }
+        }
+        MatchingRule::Events { .. } => {
+            shared::types::primitives::AlertQueueMessagePayload::Events {
+                block_hash: block_hash.to_string(),
+                receipt_id: receipt_id.to_string(),
+                transaction_hash: transaction_hash.to_string(),
+            }
+        }
+    }
 }

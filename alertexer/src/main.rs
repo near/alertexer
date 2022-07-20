@@ -2,6 +2,8 @@
 use futures::StreamExt;
 use std::collections::HashMap;
 
+use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithReceipt;
+
 use shared::{Opts, Parser};
 
 pub(crate) mod cache;
@@ -87,8 +89,18 @@ async fn handle_streamer_message(
 
     cache::cache_txs_and_receipts(&streamer_message, redis_connection_manager).await?;
 
-    let receipt_checker_future = checkers::actions::check_receipts(
-        &streamer_message,
+    let block_hash_string = streamer_message.block.header.hash.to_string();
+
+    let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
+        .shards
+        .iter()
+        .flat_map(|shard| shard.receipt_execution_outcomes.clone())
+        .collect();
+
+    // Actions and Events checks
+    let outcomes_checker_future = checkers::outcomes::check_outcomes(
+        &receipt_execution_outcomes,
+        &block_hash_string,
         chain_id,
         &alert_rules,
         redis_connection_manager,
@@ -96,16 +108,7 @@ async fn handle_streamer_message(
         queue_url,
     );
 
-    let events_checker_future = checkers::events::check_outcomes(
-        &streamer_message,
-        chain_id,
-        &alert_rules,
-        redis_connection_manager,
-        queue_client,
-        queue_url,
-    );
-
-    match futures::try_join!(receipt_checker_future, events_checker_future) {
+    match futures::try_join!(outcomes_checker_future) {
         Ok(_) => tracing::debug!(
             target: INDEXER,
             "#{} checkers executed successful",
