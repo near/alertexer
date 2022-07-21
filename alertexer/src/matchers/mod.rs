@@ -57,13 +57,12 @@ impl Matcher for MatchingRule {
 }
 
 fn match_account(
-    account_id: &String,
+    account_id: &str,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
-    wildmatch::WildMatch::new(account_id)
-        .matches(&outcome_with_receipt.receipt.receiver_id.to_string())
+    wildmatch::WildMatch::new(account_id).matches(&outcome_with_receipt.receipt.receiver_id)
         || wildmatch::WildMatch::new(account_id)
-            .matches(&outcome_with_receipt.receipt.predecessor_id.to_string())
+            .matches(&outcome_with_receipt.receipt.predecessor_id)
 }
 
 fn match_status(status: &Status, execution_outcome_status: &ExecutionStatusView) -> bool {
