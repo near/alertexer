@@ -5,6 +5,7 @@ use near_lake_framework::near_indexer_primitives::{
 
 mod actions;
 mod events;
+pub(crate) mod state_changes;
 
 pub trait Matcher {
     fn matches(&self, outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt) -> bool;
@@ -40,46 +41,47 @@ impl Matcher for MatchingRule {
                 function,
                 outcome_with_receipt,
             ),
-            MatchingRule::Events {
-                affected_account_id,
-                event_name,
+            MatchingRule::Event {
+                contract_account_id,
+                event,
                 standard,
                 version,
             } => events::match_events(
-                affected_account_id,
-                event_name,
+                contract_account_id,
+                event,
                 standard,
                 version,
                 outcome_with_receipt,
             ),
+            MatchingRule::StateChangeAccountBalance { .. } => unreachable!("Unreachable code! Didn't expect StateChanges based MatchingRule in `outcomes` checker"),
         }
     }
 }
 
 fn match_account(
-    account_id: &String,
+    account_id: &str,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
     wildmatch::WildMatch::new(account_id)
-        .matches(&outcome_with_receipt.receipt.receiver_id.to_string())
+        .matches(&outcome_with_receipt.receipt.receiver_id)
         || wildmatch::WildMatch::new(account_id)
-            .matches(&outcome_with_receipt.receipt.predecessor_id.to_string())
+            .matches(&outcome_with_receipt.receipt.predecessor_id)
 }
 
 fn match_status(status: &Status, execution_outcome_status: &ExecutionStatusView) -> bool {
     match status {
-        Status::Any => return true,
+        Status::Any => true,
         Status::Success => match execution_outcome_status {
             ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
-                return true
+                true
             }
-            _ => return false,
+            _ => false,
         },
         Status::Fail => match execution_outcome_status {
             ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
-                return false
+                false
             }
-            _ => return true,
+            _ => true,
         },
     }
 }

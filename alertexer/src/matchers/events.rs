@@ -3,10 +3,10 @@ use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithRec
 use shared::types::events::Event;
 
 pub(crate) fn match_events(
-    account_id: &String,
-    event_name: &String,
-    standard: &String,
-    version: &String,
+    account_id: &str,
+    event: &str,
+    standard: &str,
+    version: &str,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
     if super::match_account(account_id, outcome_with_receipt) {
@@ -16,11 +16,11 @@ pub(crate) fn match_events(
             .logs
             .iter()
             .filter_map(|log| Event::from_log(log).ok())
-            .filter(|event| {
+            .filter(|near_event| {
                 vec![
-                    wildmatch::WildMatch::new(event_name).matches(&event.event),
-                    wildmatch::WildMatch::new(standard).matches(&event.standard),
-                    wildmatch::WildMatch::new(version).matches(&event.version),
+                    wildmatch::WildMatch::new(event).matches(&near_event.event),
+                    wildmatch::WildMatch::new(standard).matches(&near_event.standard),
+                    wildmatch::WildMatch::new(version).matches(&near_event.version),
                 ]
                 .into_iter()
                 .all(|val| val)

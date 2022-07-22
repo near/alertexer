@@ -113,6 +113,13 @@ impl Opts {
         let shared_config = self.queue_aws_sdk_config();
         aws_sdk_sqs::Client::new(&shared_config)
     }
+
+    pub fn rpc_url(&self) -> &str {
+        match self.chain_id {
+            ChainId::Mainnet(_) => "https://rpc.mainnet.near.org",
+            ChainId::Testnet(_) => "https://rpc.testnet.near.org",
+        }
+    }
 }
 
 impl Opts {
@@ -149,7 +156,7 @@ async fn get_start_block_height(opts: &Opts) -> u64 {
                         "Failed to connect to Redis to get last synced block, failing to the latest...\n{:#?}",
                         err,
                     );
-                    return final_block_height().await;
+                    return final_block_height(opts).await;
                 }
             };
             match storage::get_last_indexed_block(&redis_connection_manager).await {
@@ -160,11 +167,11 @@ async fn get_start_block_height(opts: &Opts) -> u64 {
                         "Failed to get last indexer block from Redis. Failing to the latest one...\n{:#?}",
                         err
                     );
-                    final_block_height().await
+                    final_block_height(opts).await
                 }
             }
         }
-        StartOptions::FromLatest => final_block_height().await,
+        StartOptions::FromLatest => final_block_height(opts).await,
     }
 }
 
@@ -219,8 +226,8 @@ pub async fn send_to_the_queue(
     Ok(())
 }
 
-async fn final_block_height() -> u64 {
-    let client = JsonRpcClient::connect("https://rpc.mainnet.near.org");
+async fn final_block_height(opts: &Opts) -> u64 {
+    let client = JsonRpcClient::connect(opts.rpc_url());
     let request = methods::block::RpcBlockRequest {
         block_reference: BlockReference::Finality(Finality::Final),
     };

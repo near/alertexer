@@ -21,7 +21,7 @@ pub(crate) async fn check_outcomes(
             block_hash,
             chain_id,
             alert_rule,
-            &receipt_execution_outcomes,
+            receipt_execution_outcomes,
             redis_connection_manager,
             queue_client,
             queue_url,
@@ -153,12 +153,13 @@ fn build_alert_queue_message_payload(
                 transaction_hash: transaction_hash.to_string(),
             }
         }
-        MatchingRule::Events { .. } => {
+        MatchingRule::Event { .. } => {
             shared::types::primitives::AlertQueueMessagePayload::Events {
                 block_hash: block_hash.to_string(),
                 receipt_id: receipt_id.to_string(),
                 transaction_hash: transaction_hash.to_string(),
             }
         }
+        MatchingRule::StateChangeAccountBalance { .. } => unreachable!("Unreachable code! Got StateChanges based MatchingRule we don't expect in `outcomes` checker"),
     }
 }

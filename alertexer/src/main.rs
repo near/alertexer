@@ -1,8 +1,13 @@
 #![feature(explicit_generic_args_with_impl_trait)]
-use futures::StreamExt;
 use std::collections::HashMap;
 
-use near_lake_framework::near_indexer_primitives::IndexerExecutionOutcomeWithReceipt;
+use cached::SizedCache;
+use futures::StreamExt;
+use tokio::sync::Mutex;
+
+use near_lake_framework::near_indexer_primitives::{
+    types, views::StateChangeWithCauseView, IndexerExecutionOutcomeWithReceipt,
+};
 
 use shared::{Opts, Parser};
 
@@ -10,9 +15,20 @@ pub(crate) mod cache;
 mod checkers;
 pub(crate) mod matchers;
 pub(crate) const INDEXER: &str = "alertexer";
+pub(crate) const INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+pub(crate) const MAX_DELAY_TIME: std::time::Duration = std::time::Duration::from_millis(4000);
+pub(crate) const RETRY_COUNT: usize = 2;
 
 pub(crate) type AlertRulesInMemory =
     std::sync::Arc<tokio::sync::Mutex<HashMap<i32, alert_rules::AlertRule>>>;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BalanceDetails {
+    pub non_staked: types::Balance,
+    pub staked: types::Balance,
+}
+
+pub type BalanceCache = std::sync::Arc<Mutex<SizedCache<types::AccountId, BalanceDetails>>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,6 +44,10 @@ async fn main() -> anyhow::Result<()> {
     let alert_rules_inmemory: AlertRulesInMemory =
         std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
+    // We want to prevent unnecessary RPC queries to find previous balance
+    let balances_cache: BalanceCache =
+        std::sync::Arc::new(Mutex::new(SizedCache::with_size(100_000)));
+
     tracing::info!(target: INDEXER, "Connecting to redis...");
     let redis_connection_manager = storage::connect(&opts.redis_connection_string).await?;
 
@@ -37,6 +57,8 @@ async fn main() -> anyhow::Result<()> {
         std::sync::Arc::clone(&alert_rules_inmemory),
         chain_id.clone(),
     ));
+
+    let json_rpc_client = near_jsonrpc_client::JsonRpcClient::connect(opts.rpc_url());
 
     tracing::info!(target: INDEXER, "Generating LakeConfig...");
     let config: near_lake_framework::LakeConfig = opts.to_lake_config().await;
@@ -58,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
                 &redis_connection_manager,
                 queue_client,
                 &queue_url,
+                &json_rpc_client,
+                std::sync::Arc::clone(&balances_cache),
             )
         })
         .buffer_unordered(1usize);
@@ -80,6 +104,8 @@ async fn handle_streamer_message(
     redis_connection_manager: &storage::ConnectionManager,
     queue_client: &shared::QueueClient,
     queue_url: &str,
+    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
+    balances_cache: BalanceCache,
 ) -> anyhow::Result<u64> {
     let alert_rules_inmemory_lock = alert_rules_inmemory.lock().await;
     // TODO: avoid cloning
@@ -90,6 +116,31 @@ async fn handle_streamer_message(
     cache::cache_txs_and_receipts(&streamer_message, redis_connection_manager).await?;
 
     let block_hash_string = streamer_message.block.header.hash.to_string();
+    let prev_block_hash_string = streamer_message.block.header.prev_hash.to_string();
+
+    let receipts_and_outcomes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
+        .iter()
+        .cloned()
+        .filter(|alert_rule| {
+            matches!(
+                alert_rule.matching_rule(),
+                alert_rules::MatchingRule::Event { .. }
+                    | alert_rules::MatchingRule::ActionAny { .. }
+                    | alert_rules::MatchingRule::ActionTransfer { .. }
+                    | alert_rules::MatchingRule::ActionFunctionCall { .. }
+            )
+        })
+        .collect();
+
+    let state_changes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
+        .into_iter()
+        .filter(|alert_rule| {
+            matches!(
+                alert_rule.matching_rule(),
+                alert_rules::MatchingRule::StateChangeAccountBalance { .. }
+            )
+        })
+        .collect();
 
     let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
         .shards
@@ -102,13 +153,36 @@ async fn handle_streamer_message(
         &receipt_execution_outcomes,
         &block_hash_string,
         chain_id,
-        &alert_rules,
+        &receipts_and_outcomes_based_alert_rules,
         redis_connection_manager,
         queue_client,
         queue_url,
     );
 
-    match futures::try_join!(outcomes_checker_future) {
+    let state_changes: Vec<StateChangeWithCauseView> = streamer_message
+        .shards
+        .into_iter()
+        .flat_map(|shard| {
+            shard
+                .state_changes
+                .into_iter()
+        })
+        .collect();
+
+    let state_changes_checker_future = checkers::state_changes::check_state_changes(
+        &state_changes,
+        &block_hash_string,
+        &prev_block_hash_string,
+        chain_id,
+        &state_changes_based_alert_rules,
+        &balances_cache,
+        redis_connection_manager,
+        queue_client,
+        queue_url,
+        json_rpc_client,
+    );
+
+    match futures::try_join!(outcomes_checker_future, state_changes_checker_future) {
         Ok(_) => tracing::debug!(
             target: INDEXER,
             "#{} checkers executed successful",

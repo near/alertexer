@@ -6,7 +6,7 @@ use near_lake_framework::near_indexer_primitives::{
 };
 
 pub(crate) fn match_action_any(
-    account_id: &String,
+    account_id: &str,
     status: &Status,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
@@ -20,9 +20,9 @@ pub(crate) fn match_action_any(
 }
 
 pub(crate) fn match_action_function_call(
-    account_id: &String,
+    account_id: &str,
     status: &Status,
-    function: &String,
+    function: &str,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
     if super::match_account(account_id, outcome_with_receipt) {
