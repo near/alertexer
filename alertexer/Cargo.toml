@@ -6,7 +6,6 @@ authors = ["Near Inc <hello@nearprotocol.com>"]
 
 [dependencies]
 anyhow = "1.0.57"
-async-trait = "0.1.56"
 borsh = "0.9.3"
 cached = "0.23.0"
 futures = "0.3.5"
