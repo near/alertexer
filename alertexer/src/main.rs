@@ -162,11 +162,7 @@ async fn handle_streamer_message(
     let state_changes: Vec<StateChangeWithCauseView> = streamer_message
         .shards
         .into_iter()
-        .flat_map(|shard| {
-            shard
-                .state_changes
-                .into_iter()
-        })
+        .flat_map(|shard| shard.state_changes.into_iter())
         .collect();
 
     let state_changes_checker_future = checkers::state_changes::check_state_changes(

@@ -14,7 +14,10 @@ pub(crate) async fn match_state_change_account_balance(
     // Only `AccountView` struct exposes the amount so we ignore any other state changes
     // except `AccountDeletion` in this case new balances are 0
     match &state_change.value {
-        StateChangeValueView::AccountUpdate { account_id, account } => {
+        StateChangeValueView::AccountUpdate {
+            account_id,
+            account,
+        } => {
             if wildmatch::WildMatch::new(watching_account_id).matches(account_id) {
                 let prev_account_balance = match crate::cache::get_balance_retriable(
                     account_id,
@@ -75,7 +78,7 @@ pub(crate) async fn match_state_change_account_balance(
             } else {
                 false
             }
-        },
+        }
         StateChangeValueView::AccountDeletion { account_id } => {
             if wildmatch::WildMatch::new(watching_account_id).matches(account_id) {
                 let prev_account_balance = match crate::cache::get_balance_retriable(
@@ -84,7 +87,8 @@ pub(crate) async fn match_state_change_account_balance(
                     balance_cache,
                     json_rpc_client,
                 )
-                .await {
+                .await
+                {
                     Ok(res) => {
                         crate::cache::save_latest_balance(
                             account_id.clone(),
@@ -96,7 +100,7 @@ pub(crate) async fn match_state_change_account_balance(
                         )
                         .await;
                         res.non_staked + res.staked
-                    },
+                    }
                     Err(err) => {
                         tracing::error!(
                             target: crate::INDEXER,

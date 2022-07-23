@@ -62,8 +62,7 @@ fn match_account(
     account_id: &str,
     outcome_with_receipt: &IndexerExecutionOutcomeWithReceipt,
 ) -> bool {
-    wildmatch::WildMatch::new(account_id)
-        .matches(&outcome_with_receipt.receipt.receiver_id)
+    wildmatch::WildMatch::new(account_id).matches(&outcome_with_receipt.receipt.receiver_id)
         || wildmatch::WildMatch::new(account_id)
             .matches(&outcome_with_receipt.receipt.predecessor_id)
 }
@@ -72,9 +71,7 @@ fn match_status(status: &Status, execution_outcome_status: &ExecutionStatusView)
     match status {
         Status::Any => true,
         Status::Success => match execution_outcome_status {
-            ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => {
-                true
-            }
+            ExecutionStatusView::SuccessValue(_) | ExecutionStatusView::SuccessReceiptId(_) => true,
             _ => false,
         },
         Status::Fail => match execution_outcome_status {
