@@ -1867,7 +1867,9 @@ dependencies = [
 
 [[package]]
 name = "near-lake-framework"
-version = "0.0.0"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0316ee594f99e37604a0ec839e0130519e8e42110cfe4049d64d8f4b021c49e"
 dependencies = [
  "anyhow",
  "aws-config",
