@@ -5,9 +5,7 @@ use cached::SizedCache;
 use futures::StreamExt;
 use tokio::sync::Mutex;
 
-use near_lake_framework::near_indexer_primitives::{
-    types, views::StateChangeWithCauseView, IndexerExecutionOutcomeWithReceipt,
-};
+use near_lake_framework::near_indexer_primitives::types;
 
 use shared::{Opts, Parser};
 
@@ -29,6 +27,17 @@ pub struct BalanceDetails {
 }
 
 pub type BalanceCache = std::sync::Arc<Mutex<SizedCache<types::AccountId, BalanceDetails>>>;
+
+pub(crate) struct AlertexerContext<'a> {
+    pub streamer_message: near_lake_framework::near_indexer_primitives::StreamerMessage,
+    pub chain_id: &'a shared::types::primitives::ChainId,
+    pub queue_client: &'a shared::QueueClient,
+    pub queue_url: &'a str,
+    pub alert_rules_inmemory: AlertRulesInMemory,
+    pub balance_cache: &'a BalanceCache,
+    pub redis_connection_manager: &'a storage::ConnectionManager,
+    pub json_rpc_client: &'a near_jsonrpc_client::JsonRpcClient,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -73,16 +82,17 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(target: INDEXER, "Starting Alertexer...",);
     let mut handlers = tokio_stream::wrappers::ReceiverStream::new(stream)
         .map(|streamer_message| {
-            handle_streamer_message(
+            let context = AlertexerContext {
+                alert_rules_inmemory: std::sync::Arc::clone(&alert_rules_inmemory),
+                redis_connection_manager: &redis_connection_manager,
+                queue_url: &queue_url,
+                json_rpc_client: &json_rpc_client,
+                balance_cache: &balances_cache,
                 streamer_message,
                 chain_id,
-                std::sync::Arc::clone(&alert_rules_inmemory),
-                &redis_connection_manager,
                 queue_client,
-                &queue_url,
-                &json_rpc_client,
-                std::sync::Arc::clone(&balances_cache),
-            )
+            };
+            handle_streamer_message(context)
         })
         .buffer_unordered(1usize);
 
@@ -97,108 +107,92 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn handle_streamer_message(
-    streamer_message: near_lake_framework::near_indexer_primitives::StreamerMessage,
-    chain_id: &shared::types::primitives::ChainId,
-    alert_rules_inmemory: AlertRulesInMemory,
-    redis_connection_manager: &storage::ConnectionManager,
-    queue_client: &shared::QueueClient,
-    queue_url: &str,
-    json_rpc_client: &near_jsonrpc_client::JsonRpcClient,
-    balances_cache: BalanceCache,
-) -> anyhow::Result<u64> {
-    let alert_rules_inmemory_lock = alert_rules_inmemory.lock().await;
-    // TODO: avoid cloning
-    let alert_rules: Vec<alert_rules::AlertRule> =
-        alert_rules_inmemory_lock.values().cloned().collect();
-    drop(alert_rules_inmemory_lock);
+async fn handle_streamer_message(context: AlertexerContext<'_>) -> anyhow::Result<u64> {
+    // let alert_rules_inmemory_lock = context.alert_rules_inmemory.lock().await;
+    // // TODO: avoid cloning
+    // let alert_rules: Vec<alert_rules::AlertRule> =
+    //     alert_rules_inmemory_lock.values().cloned().collect();
+    // drop(alert_rules_inmemory_lock);
 
-    cache::cache_txs_and_receipts(&streamer_message, redis_connection_manager).await?;
+    cache::cache_txs_and_receipts(&context.streamer_message, context.redis_connection_manager)
+        .await?;
 
-    let block_hash_string = streamer_message.block.header.hash.to_string();
-    let prev_block_hash_string = streamer_message.block.header.prev_hash.to_string();
+    // let receipts_and_outcomes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
+    //     .iter()
+    //     .cloned()
+    //     .filter(|alert_rule| {
+    //         matches!(
+    //             alert_rule.matching_rule(),
+    //             alert_rules::MatchingRule::Event { .. }
+    //                 | alert_rules::MatchingRule::ActionAny { .. }
+    //                 | alert_rules::MatchingRule::ActionTransfer { .. }
+    //                 | alert_rules::MatchingRule::ActionFunctionCall { .. }
+    //         )
+    //     })
+    //     .collect();
 
-    let receipts_and_outcomes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
-        .iter()
-        .cloned()
-        .filter(|alert_rule| {
-            matches!(
-                alert_rule.matching_rule(),
-                alert_rules::MatchingRule::Event { .. }
-                    | alert_rules::MatchingRule::ActionAny { .. }
-                    | alert_rules::MatchingRule::ActionTransfer { .. }
-                    | alert_rules::MatchingRule::ActionFunctionCall { .. }
-            )
-        })
-        .collect();
+    // let state_changes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
+    //     .into_iter()
+    //     .filter(|alert_rule| {
+    //         matches!(
+    //             alert_rule.matching_rule(),
+    //             alert_rules::MatchingRule::StateChangeAccountBalance { .. }
+    //         )
+    //     })
+    //     .collect();
 
-    let state_changes_based_alert_rules: Vec<alert_rules::AlertRule> = alert_rules
-        .into_iter()
-        .filter(|alert_rule| {
-            matches!(
-                alert_rule.matching_rule(),
-                alert_rules::MatchingRule::StateChangeAccountBalance { .. }
-            )
-        })
-        .collect();
-
-    let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
-        .shards
-        .iter()
-        .flat_map(|shard| shard.receipt_execution_outcomes.clone())
-        .collect();
+    // let receipt_execution_outcomes: Vec<IndexerExecutionOutcomeWithReceipt> = streamer_message
+    //     .shards
+    //     .iter()
+    //     .flat_map(|shard| shard.receipt_execution_outcomes.clone())
+    //     .collect();
 
     // Actions and Events checks
-    let outcomes_checker_future = checkers::outcomes::check_outcomes(
-        &receipt_execution_outcomes,
-        &block_hash_string,
-        chain_id,
-        &receipts_and_outcomes_based_alert_rules,
-        redis_connection_manager,
-        queue_client,
-        queue_url,
-    );
+    let outcomes_checker_future = checkers::outcomes::check_outcomes(&context);
 
-    let state_changes: Vec<StateChangeWithCauseView> = streamer_message
-        .shards
-        .into_iter()
-        .flat_map(|shard| shard.state_changes.into_iter())
-        .collect();
+    // let state_changes: Vec<StateChangeWithCauseView> = streamer_message
+    //     .shards
+    //     .into_iter()
+    //     .flat_map(|shard| shard.state_changes.into_iter())
+    //     .collect();
 
-    let state_changes_checker_future = checkers::state_changes::check_state_changes(
-        &state_changes,
-        &block_hash_string,
-        &prev_block_hash_string,
-        chain_id,
-        &state_changes_based_alert_rules,
-        &balances_cache,
-        redis_connection_manager,
-        queue_client,
-        queue_url,
-        json_rpc_client,
-    );
+    // let state_changes_checker_future = checkers::state_changes::check_state_changes(
+    //     &state_changes,
+    //     &block_hash_string,
+    //     &prev_block_hash_string,
+    //     chain_id,
+    //     &state_changes_based_alert_rules,
+    //     &balances_cache,
+    //     redis_connection_manager,
+    //     queue_client,
+    //     queue_url,
+    //     json_rpc_client,
+    // );
 
-    match futures::try_join!(outcomes_checker_future, state_changes_checker_future) {
+    match futures::try_join!(
+        outcomes_checker_future,
+        // state_changes_checker_future,
+    ) {
         Ok(_) => tracing::debug!(
             target: INDEXER,
             "#{} checkers executed successful",
-            streamer_message.block.header.height,
+            context.streamer_message.block.header.height,
         ),
         Err(e) => tracing::error!(
             target: INDEXER,
             "#{} an error occurred during executing checkers\n{:#?}",
-            streamer_message.block.header.height,
+            context.streamer_message.block.header.height,
             e
         ),
     };
 
     storage::update_last_indexed_block(
-        redis_connection_manager,
-        streamer_message.block.header.height,
+        context.redis_connection_manager,
+        context.streamer_message.block.header.height,
     )
     .await?;
 
-    Ok(streamer_message.block.header.height)
+    Ok(context.streamer_message.block.header.height)
 }
 
 async fn alert_rules_fetcher(
