@@ -1,4 +1,6 @@
-pub use aws_sdk_sqs::{error::SendMessageError, Client as QueueClient, Region};
+pub use aws_sdk_sqs::{
+    error::SendMessageError, model::SendMessageBatchRequestEntry, Client as QueueClient, Region,
+};
 pub use base64;
 pub use borsh::{self, BorshDeserialize, BorshSerialize};
 pub use clap::{Parser, Subcommand};
@@ -201,21 +203,31 @@ pub fn init_tracing() {
 pub async fn send_to_the_queue(
     client: &aws_sdk_sqs::Client,
     queue_url: String,
-    message: types::primitives::AlertQueueMessage,
+    alert_queue_messages: Vec<types::primitives::AlertQueueMessage>,
 ) -> anyhow::Result<()> {
     tracing::info!(
         target: "alertexer",
-        "Sending alert to the queue\n{:#?}",
-        message
+        "Sending alerts to the queue\n{:#?}",
+        alert_queue_messages
     );
-    let message_serialized = base64::encode(message.try_to_vec()?);
 
-    eprintln!("{}", &message_serialized);
+    let message_bodies: Vec<SendMessageBatchRequestEntry> = alert_queue_messages
+        .into_iter()
+        .map(|alert_queue_message| {
+            SendMessageBatchRequestEntry::builder()
+                .message_body(base64::encode(
+                    alert_queue_message
+                        .try_to_vec()
+                        .expect("Failed to BorshSerialize AlertQueueMessage"),
+                ))
+                .build()
+        })
+        .collect();
 
     let rsp = client
-        .send_message()
+        .send_message_batch()
         .queue_url(queue_url)
-        .message_body(message_serialized)
+        .set_entries(Some(message_bodies))
         .send()
         .await?;
     tracing::debug!(
