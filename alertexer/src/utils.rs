@@ -47,13 +47,17 @@ pub(crate) async fn alert_rules_fetcher(
         };
 
         let mut alert_rules_inmemory_lock = alert_rules_inmemory.lock().await;
-        for (id, alert_rule) in alert_rules_tuples {
-            if alert_rule.is_paused {
-                alert_rules_inmemory_lock.remove(&id);
-            } else {
-                alert_rules_inmemory_lock.insert(id, alert_rule);
-            }
-        }
+        alert_rules_inmemory_lock.clear();
+        alert_rules_inmemory_lock.extend(alert_rules_tuples.into_iter().filter_map(
+            |(id, alert_rule)| {
+                if !alert_rule.is_paused {
+                    Some((id, alert_rule))
+                } else {
+                    None
+                }
+            },
+        ));
+
         drop(alert_rules_inmemory_lock);
 
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;

@@ -113,9 +113,8 @@ fn match_event(
                 .all(|val| val)
             })
             .collect();
-        if !outcome_logs_with_triggered_events_json.is_empty() {
-            return true;
-        }
+
+        return !outcome_logs_with_triggered_events_json.is_empty();
     }
     false
 }
