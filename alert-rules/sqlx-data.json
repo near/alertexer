@@ -52,7 +52,7 @@
         {
           "name": "updated_at",
           "ordinal": 5,
-          "type_info": "Timestamp"
+          "type_info": "Timestamptz"
         },
         {
           "name": "matching_rule: sqlx::types::Json<MatchingRule>",
