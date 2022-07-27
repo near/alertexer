@@ -80,6 +80,7 @@ async fn build_alert_queue_message(
     Ok(AlertQueueMessage {
         chain_id: context.chain_id.clone(),
         alert_rule_id: alert_rule.id,
+        alert_name: alert_rule.name.clone(),
         payload,
     })
 }
