@@ -44,6 +44,9 @@ pub struct Opts {
     /// URL to the main AWS SQS queue backed by Queue Handler lambda
     #[clap(long, env)]
     pub queue_url: String,
+    /// Custom RPC URL to be used with this instance instead of predefined ones
+    #[clap(long, env)]
+    pub rpc_url: Option<String>,
     /// Chain ID: testnet or mainnet
     #[clap(subcommand)]
     pub chain_id: ChainId,
@@ -126,9 +129,13 @@ impl Opts {
     }
 
     pub fn rpc_url(&self) -> &str {
-        match self.chain_id {
-            ChainId::Mainnet(_) => "https://rpc.mainnet.near.org",
-            ChainId::Testnet(_) => "https://rpc.testnet.near.org",
+        if let Some(rpc) = &self.rpc_url {
+            rpc
+        } else {
+            match self.chain_id {
+                ChainId::Mainnet(_) => "https://rpc.mainnet.near.org",
+                ChainId::Testnet(_) => "https://rpc.testnet.near.org",
+            }
         }
     }
 }
