@@ -1,4 +1,3 @@
-#![feature(explicit_generic_args_with_impl_trait)]
 use std::collections::HashMap;
 
 use cached::SizedCache;
