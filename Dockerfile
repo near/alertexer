@@ -1,8 +1,4 @@
-FROM rust:1.64.0 AS build
-
-# We have to use sparse-registry nightly cargo feature to avoid running out of RAM:
-# https://github.com/rust-lang/cargo/issues/10781
-# RUN rustup toolchain install nightly-2022-07-21 && rustup override set nightly-2022-07-21
+FROM rust:1.68 AS build
 
 WORKDIR /tmp/
 COPY Cargo.toml Cargo.lock ./
